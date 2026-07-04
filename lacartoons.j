@@ -12,4 +12,3 @@
       "https://*.lacartoons.com/*"
     ]
   }
-}
