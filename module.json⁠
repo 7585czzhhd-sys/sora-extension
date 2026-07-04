@@ -6,7 +6,7 @@
   "icon": "https://www.lacartoons.com/favicon.ico",
   "author": "Sora Developer",
   "type": "video_extension",
-  "script": "https://raw.githubusercontent.com/7585czzhhd-sys/sora-extenion/master/lacartoons.js",
+  "script": "https://raw.githubusercontent.com/7585czzhhd-sys/sora-extension/main/lacartoons.js",
   "meta": {
     "supported_urls": [
       "https://*.lacartoons.com/*"
