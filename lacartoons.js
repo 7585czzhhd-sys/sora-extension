@@ -1,5 +1,5 @@
 /** * LACartoons Sora Module
- * Optimized with flexible web-scraping fallbacks
+ * Re-architected with independent DOM property fallback parsing
  */
 
 const BASE_URL = "https://www.lacartoons.com";
@@ -14,12 +14,11 @@ async function searchResults(keyword) {
         if (!html) return JSON.stringify([]);
 
         const results = [];
-        
-        // A much broader regex that looks for any link containing an image and a title/alt tag inside standard search result layouts
-        const broadRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>[\s\S]*?<img[^>]+src=["']([^"']+)["'][^>]*alt=["']([^"']+)["']/gi;
-        
+
+        // Pattern 1: Target common clean anchor layouts with titles and nested thumbnails
+        const cardRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>[\s\S]*?<img[^>]+src=["']([^"']+)["'][^>]*alt=["']([^"']+)["']/gi;
         let match;
-        while ((match = broadRegex.exec(html)) !== null) {
+        while ((match = cardRegex.exec(html)) !== null) {
             results.push({
                 title: match[3].trim(),
                 image: match[2],
@@ -27,27 +26,49 @@ async function searchResults(keyword) {
             });
         }
 
-        // Fallback layout check if the site uses standalone titles next to images
+        // Pattern 2 Fallback: If layout mapping fails, parse generic title headers + links raw
         if (results.length === 0) {
-            const fallbackRegex = /<h[23][^>]*><a[^>]+href=["']([^"']+)["'][^>]*>([^<]+)<\/a><\/h[23]>/gi;
-            while ((match = fallbackRegex.exec(html)) !== null) {
+            // Catches standard headers or specific post link structures
+            const linkRegex = /href=["']([^"']+)["'][^>]*title=["']([^"']+)["']/gi;
+            while ((match = linkRegex.exec(html)) !== null) {
+                // Ignore structural framework links (privacy pages, home, etc.)
+                if (match[1].includes('/category/') || match[1] === BASE_URL || match[1] === `${BASE_URL}/`) continue;
+                
                 results.push({
                     title: match[2].trim(),
-                    image: "https://www.lacartoons.com/favicon.ico", // Fallback thumbnail if image matches fail
+                    image: "https://www.lacartoons.com/favicon.ico",
                     href: match[1]
                 });
             }
         }
 
-        return JSON.stringify(results);
+        // Pattern 3 Final Fallback: Parse generic textual links if titles are buried in child nodes
+        if (results.length === 0) {
+            const basicRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>([^<]+)<\/a>/gi;
+            while ((match = basicRegex.exec(html)) !== null) {
+                const titleText = match[2].trim();
+                if (titleText.length > 3 && !match[1].includes('/tag/') && !match[1].includes('/category/')) {
+                    results.push({
+                        title: titleText,
+                        image: "https://www.lacartoons.com/favicon.ico",
+                        href: match[1]
+                    });
+                }
+            }
+        }
+
+        // De-duplicate results matching the exact same target link
+        const uniqueResults = Array.from(new Map(results.map(item => [item.href, item])).values());
+        return JSON.stringify(uniqueResults);
+
     } catch (error) {
-        console.log('Search error:', error);
+        console.log('Search parser error:', error);
         return JSON.stringify([]);
     }
 }
 
 /** extractDetails
- * Extracts description data from the series page.
+ * Extracts overview information.
  */
 async function extractDetails(url) {
     try {
@@ -55,22 +76,20 @@ async function extractDetails(url) {
         if (!html) return JSON.stringify([]);
 
         const descMatch = html.match(/<meta name="description" content="([^"]+)"/i) || html.match(/<p>([\s\S]*?)<\/p>/i);
-        const description = descMatch ? descMatch[1].replace(/<[^>]*>/g, '').trim() : "LACartoons Series";
+        const description = descMatch ? descMatch[1].replace(/<[^>]*>/g, '').trim() : "LACartoons Content";
 
-        const transformedResults = [{
+        return JSON.stringify([{
             description: description,
-            aliases: "Language: Spanish",
-            airdate: "Status: Available"
-        }];
-        
-        return JSON.stringify(transformedResults);
+            aliases: "Language: Español (Latino)",
+            airdate: "Status: Active"
+        }]);
     } catch (error) {
-        return JSON.stringify([{ description: 'LACartoons Series', aliases: '', airdate: '' }]);
+        return JSON.stringify([{ description: 'LACartoons Content', aliases: '', airdate: '' }]);
     }
 }
 
 /** extractEpisodes
- * Gathers the lists of individual stream links/episodes.
+ * Gathers target stream index arrays.
  */
 async function extractEpisodes(url) {
     try {
@@ -78,8 +97,7 @@ async function extractEpisodes(url) {
         if (!html) return JSON.stringify([]);
 
         const episodes = [];
-        
-        // Looks for links that contain text like "Capitulo", "Capítulo", or "Episode"
+        // Matches classic streaming link lists
         const epRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?Cap[ií]tulo\s*\d+|[\s\S]*?Episode\s*\d+[^<]*)<\/a>/gi;
 
         let match;
@@ -91,7 +109,6 @@ async function extractEpisodes(url) {
             });
         }
 
-        // Fallback: If no distinct episode anchors match, treat the source page itself as the player video container
         if (episodes.length === 0) {
             episodes.push({ href: url, number: 1 });
         }
@@ -103,14 +120,13 @@ async function extractEpisodes(url) {
 }
 
 /** extractStreamUrl
- * Grabs embed strings or direct media links.
+ * Resolves source strings for the media framework.
  */
 async function extractStreamUrl(url) {
     try {
         const html = await soraFetch(url);
         if (!html) return null;
 
-        // Extract raw iframe players
         const iframeRegex = /<iframe[^>]+src=["']([^"']+)["']/i;
         const match = html.match(iframeRegex);
         
@@ -123,7 +139,6 @@ async function extractStreamUrl(url) {
         const scriptVideoRegex = /file\s*:\s*["'](http[s]?:\/\/[^"']+)["']/i;
         const fileMatch = html.match(scriptVideoRegex);
         return fileMatch ? fileMatch[1] : null;
-
     } catch (error) {
         return null;
     }
