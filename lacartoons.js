@@ -1,90 +1,89 @@
 /**
- * LACartoons Sora Local Scraper Module
- * Bypasses Cloudflare by running directly on your residential device connection
+ * LACartoons Ultimate Brute-Force Local Scraper
+ * Bypasses all strict structural layout assumptions
  */
 
 const BASE_URL = "https://www.lacartoons.com";
 
 /**
  * searchResults
- * Downloads the HTML search page directly on your device and extracts titles
+ * Blindly grabs any image and link combo matching the keyword
  */
 async function searchResults(keyword) {
     try {
         const encodedKeyword = encodeURIComponent(keyword);
         const url = `${BASE_URL}/?s=${encodedKeyword}`;
         
-        // Fetch the raw page HTML using Sora's native network layer
         const html = await soraFetch(url);
         if (!html) return JSON.stringify([]);
 
         const results = [];
         
-        // Regex pattern to extract article links, images, and titles from the page HTML
-        const articleRegex = /<article[^>]*>[\s\S]*?<a\s+href="([^"]+)"[^>]*>[\s\S]*?<img[^>]+src="([^"]+)"[\s\S]*?<h[23][^>]*>([\s\S]*?)<\/h[23]>/gi;
-        
+        // Strategy 1: Find every standard text/image link element on the page broadly
+        const genericLinkRegex = /<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
         let match;
-        while ((match = articleRegex.exec(html)) !== null) {
+        
+        while ((match = genericLinkRegex.exec(html)) !== null) {
             const href = match[1];
-            const img = match[2];
-            // Remove any leftover HTML tags inside the title string
-            const title = match[3].replace(/<[^>]*>/g, '').trim();
+            const content = match[2];
+            
+            // Extract text content and clean out internal tags
+            const cleanText = content.replace(/<[^>]*>/g, '').trim();
+            
+            // Check if either the URL link or the visible text matches your keyword
+            if (href.toLowerCase().includes(keyword.toLowerCase()) || cleanText.toLowerCase().includes(keyword.toLowerCase())) {
+                if (href === BASE_URL || href.includes('/?s=') || href.includes('wp-content')) continue;
 
-            if (href && title) {
+                // Try to find an image tag buried near or inside that link
+                const imgRegex = /<img[^>]+src=["']([^"']+)["']/i;
+                const imgMatch = content.match(imgRegex);
+                const finalImg = imgMatch ? imgMatch[1] : `${BASE_URL}/favicon.ico`;
+
                 results.push({
-                    title: title,
-                    image: img || `${BASE_URL}/favicon.ico`,
+                    title: cleanText || 'Ver Contenido',
+                    image: finalImg,
                     href: href
                 });
             }
         }
 
-        return JSON.stringify(results);
+        // Remove exact duplicate links
+        const uniqueResults = Array.from(new Map(results.map(item => [item.href, item])).values());
+        return JSON.stringify(uniqueResults);
         
     } catch (error) {
-        console.log('Local search processing error:', error);
+        console.log('Brute search error:', error);
         return JSON.stringify([]);
     }
 }
 
 /**
  * extractDetails
- * Loads metadata descriptions for the active card layout
  */
 async function extractDetails(url) {
-    try {
-        return JSON.stringify([{
-            description: "Contenido disponible en LACartoons.",
-            aliases: "Idioma: Español Latino",
-            airdate: "Estado: Completo"
-        }]);
-    } catch (error) {
-        return JSON.stringify([{ description: '', aliases: '', airdate: '' }]);
-    }
+    return JSON.stringify([{
+        description: "Contenido de Series de Animación de LACartoons.",
+        aliases: "Idioma: Español Latino",
+        airdate: "Estado: Activo"
+    }]);
 }
 
 /**
  * extractEpisodes
- * Passes the target page container directly down to the stream hook
  */
 async function extractEpisodes(url) {
-    try {
-        return JSON.stringify([{ href: url, number: 1 }]);
-    } catch (error) {
-        return JSON.stringify([]);
-    }
+    return JSON.stringify([{ href: url, number: 1 }]);
 }
 
 /**
  * extractStreamUrl
- * Grabs the direct video server frame from inside the webpage contents
  */
 async function extractStreamUrl(url) {
     try {
         const html = await soraFetch(url);
         if (!html) return null;
 
-        // Finds the streaming iframe source container on the page
+        // Searches blindly for ANY standard iframe source on the page layout
         const iframeRegex = /<iframe[^>]+src=["']([^"']+)["']/i;
         const match = html.match(iframeRegex);
         
