@@ -1,126 +1,66 @@
 /** * LACartoons Sora Module
- * Re-architected with independent DOM property fallback parsing
+ * Powered by your personal Vercel API Mirror
  */
 
-const BASE_URL = "https://www.lacartoons.com";
+// Your live Vercel base endpoint
+const API_URL = "https://lacartoons-api.vercel.app/api";
 
 /** searchResults
- * Searches for cartoons based on a keyword.
+ * Connects directly to your Vercel serverless function
  */
 async function searchResults(keyword) {
     try {
         const encodedKeyword = encodeURIComponent(keyword);
-        const html = await soraFetch(`${BASE_URL}/?s=${encodedKeyword}`);
-        if (!html) return JSON.stringify([]);
-
-        const results = [];
-
-        // Pattern 1: Target common clean anchor layouts with titles and nested thumbnails
-        const cardRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>[\s\S]*?<img[^>]+src=["']([^"']+)["'][^>]*alt=["']([^"']+)["']/gi;
-        let match;
-        while ((match = cardRegex.exec(html)) !== null) {
-            results.push({
-                title: match[3].trim(),
-                image: match[2],
-                href: match[1]
-            });
-        }
-
-        // Pattern 2 Fallback: If layout mapping fails, parse generic title headers + links raw
-        if (results.length === 0) {
-            // Catches standard headers or specific post link structures
-            const linkRegex = /href=["']([^"']+)["'][^>]*title=["']([^"']+)["']/gi;
-            while ((match = linkRegex.exec(html)) !== null) {
-                // Ignore structural framework links (privacy pages, home, etc.)
-                if (match[1].includes('/category/') || match[1] === BASE_URL || match[1] === `${BASE_URL}/`) continue;
-                
-                results.push({
-                    title: match[2].trim(),
-                    image: "https://www.lacartoons.com/favicon.ico",
-                    href: match[1]
-                });
-            }
-        }
-
-        // Pattern 3 Final Fallback: Parse generic textual links if titles are buried in child nodes
-        if (results.length === 0) {
-            const basicRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>([^<]+)<\/a>/gi;
-            while ((match = basicRegex.exec(html)) !== null) {
-                const titleText = match[2].trim();
-                if (titleText.length > 3 && !match[1].includes('/tag/') && !match[1].includes('/category/')) {
-                    results.push({
-                        title: titleText,
-                        image: "https://www.lacartoons.com/favicon.ico",
-                        href: match[1]
-                    });
-                }
-            }
-        }
-
-        // De-duplicate results matching the exact same target link
-        const uniqueResults = Array.from(new Map(results.map(item => [item.href, item])).values());
-        return JSON.stringify(uniqueResults);
-
+        
+        // Hits your Vercel API mirror to get clean, structured JSON
+        const responseText = await soraFetch(`${API_URL}/search?keyword=${encodedKeyword}`);
+        if (!responseText) return JSON.stringify([]);
+        
+        const data = JSON.parse(responseText);
+        
+        // Formats the data perfectly into what Sora expects
+        const transformedResults = data.animes.map(anime => ({
+            title: anime.name,
+            image: anime.img,
+            href: `https://www.lacartoons.com/${anime.id}`
+        }));
+        
+        return JSON.stringify(transformedResults);
+        
     } catch (error) {
-        console.log('Search parser error:', error);
+        console.log('API Search error:', error);
         return JSON.stringify([]);
     }
 }
 
 /** extractDetails
- * Extracts overview information.
+ * Fallback placeholders for series structure
  */
 async function extractDetails(url) {
     try {
-        const html = await soraFetch(url);
-        if (!html) return JSON.stringify([]);
-
-        const descMatch = html.match(/<meta name="description" content="([^"]+)"/i) || html.match(/<p>([\s\S]*?)<\/p>/i);
-        const description = descMatch ? descMatch[1].replace(/<[^>]*>/g, '').trim() : "LACartoons Content";
-
         return JSON.stringify([{
-            description: description,
-            aliases: "Language: Español (Latino)",
-            airdate: "Status: Active"
+            description: "Contenido de LACartoons",
+            aliases: "Idioma: Español Latino",
+            airdate: "Estado: Activo"
         }]);
     } catch (error) {
-        return JSON.stringify([{ description: 'LACartoons Content', aliases: '', airdate: '' }]);
+        return JSON.stringify([{ description: '', aliases: '', airdate: '' }]);
     }
 }
 
 /** extractEpisodes
- * Gathers target stream index arrays.
+ * Returns the current link container as the target stream link
  */
 async function extractEpisodes(url) {
     try {
-        const html = await soraFetch(url);
-        if (!html) return JSON.stringify([]);
-
-        const episodes = [];
-        // Matches classic streaming link lists
-        const epRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?Cap[ií]tulo\s*\d+|[\s\S]*?Episode\s*\d+[^<]*)<\/a>/gi;
-
-        let match;
-        let count = 1;
-        while ((match = epRegex.exec(html)) !== null) {
-            episodes.push({
-                href: match[1],
-                number: count++
-            });
-        }
-
-        if (episodes.length === 0) {
-            episodes.push({ href: url, number: 1 });
-        }
-
-        return JSON.stringify(episodes);
+        return JSON.stringify([{ href: url, number: 1 }]);
     } catch (error) {
         return JSON.stringify([]);
     }
 }
 
 /** extractStreamUrl
- * Resolves source strings for the media framework.
+ * Scrapes standard iframe sources directly from the page hook
  */
 async function extractStreamUrl(url) {
     try {
@@ -136,9 +76,7 @@ async function extractStreamUrl(url) {
             return src;
         }
         
-        const scriptVideoRegex = /file\s*:\s*["'](http[s]?:\/\/[^"']+)["']/i;
-        const fileMatch = html.match(scriptVideoRegex);
-        return fileMatch ? fileMatch[1] : null;
+        return null;
     } catch (error) {
         return null;
     }
