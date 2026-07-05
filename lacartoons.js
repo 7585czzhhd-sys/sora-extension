@@ -1,30 +1,42 @@
 /** * LACartoons Sora Module
- * Built using the Soru/Sora custom fetch runtime template
+ * Optimized with flexible web-scraping fallbacks
  */
 
 const BASE_URL = "https://www.lacartoons.com";
 
 /** searchResults
- * Searches for cartoons based on a keyword using Sora's network wrapper.
+ * Searches for cartoons based on a keyword.
  */
 async function searchResults(keyword) {
     try {
         const encodedKeyword = encodeURIComponent(keyword);
-        // soraFetch returns the raw HTML string directly
         const html = await soraFetch(`${BASE_URL}/?s=${encodedKeyword}`);
         if (!html) return JSON.stringify([]);
 
         const results = [];
-        // WordPress / web-scraping regex to pull matching posts
-        const articleRegex = /<article[^>]*>[\s\S]*?href=["']([^"']+)["'][^>]*title=["']([^"']+)["'][\s\S]*?src=["']([^"']+)["']/gi;
+        
+        // A much broader regex that looks for any link containing an image and a title/alt tag inside standard search result layouts
+        const broadRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>[\s\S]*?<img[^>]+src=["']([^"']+)["'][^>]*alt=["']([^"']+)["']/gi;
         
         let match;
-        while ((match = articleRegex.exec(html)) !== null) {
+        while ((match = broadRegex.exec(html)) !== null) {
             results.push({
-                title: match[2].trim(),
-                image: match[3],
+                title: match[3].trim(),
+                image: match[2],
                 href: match[1]
             });
+        }
+
+        // Fallback layout check if the site uses standalone titles next to images
+        if (results.length === 0) {
+            const fallbackRegex = /<h[23][^>]*><a[^>]+href=["']([^"']+)["'][^>]*>([^<]+)<\/a><\/h[23]>/gi;
+            while ((match = fallbackRegex.exec(html)) !== null) {
+                results.push({
+                    title: match[2].trim(),
+                    image: "https://www.lacartoons.com/favicon.ico", // Fallback thumbnail if image matches fail
+                    href: match[1]
+                });
+            }
         }
 
         return JSON.stringify(results);
@@ -35,7 +47,7 @@ async function searchResults(keyword) {
 }
 
 /** extractDetails
- * Extracts details from the cartoon's main overview page.
+ * Extracts description data from the series page.
  */
 async function extractDetails(url) {
     try {
@@ -43,7 +55,7 @@ async function extractDetails(url) {
         if (!html) return JSON.stringify([]);
 
         const descMatch = html.match(/<meta name="description" content="([^"]+)"/i) || html.match(/<p>([\s\S]*?)<\/p>/i);
-        const description = descMatch ? descMatch[1].replace(/<[^>]*>/g, '').trim() : "No description available.";
+        const description = descMatch ? descMatch[1].replace(/<[^>]*>/g, '').trim() : "LACartoons Series";
 
         const transformedResults = [{
             description: description,
@@ -53,8 +65,7 @@ async function extractDetails(url) {
         
         return JSON.stringify(transformedResults);
     } catch (error) {
-        console.log('Details error:', error);
-        return JSON.stringify([{ description: 'Error loading details', aliases: '', airdate: '' }]);
+        return JSON.stringify([{ description: 'LACartoons Series', aliases: '', airdate: '' }]);
     }
 }
 
@@ -67,8 +78,9 @@ async function extractEpisodes(url) {
         if (!html) return JSON.stringify([]);
 
         const episodes = [];
-        // Scrapes anchors targeting streaming lists or specific player endpoints
-        const epRegex = /<a[^+]+href=["']([^"']+)["'][^>]*>([\s\S]*?Capitulo\s*\d+|[\s\S]*?Episode\s*\d+[^<]*)<\/a>/gi;
+        
+        // Looks for links that contain text like "Capitulo", "Capítulo", or "Episode"
+        const epRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?Cap[ií]tulo\s*\d+|[\s\S]*?Episode\s*\d+[^<]*)<\/a>/gi;
 
         let match;
         let count = 1;
@@ -79,14 +91,13 @@ async function extractEpisodes(url) {
             });
         }
 
-        // Fallback: If no distinct grid links match, treat the source page as Episode 1
+        // Fallback: If no distinct episode anchors match, treat the source page itself as the player video container
         if (episodes.length === 0) {
             episodes.push({ href: url, number: 1 });
         }
 
         return JSON.stringify(episodes);
     } catch (error) {
-        console.log('Episodes error:', error);
         return JSON.stringify([]);
     }
 }
@@ -99,7 +110,7 @@ async function extractStreamUrl(url) {
         const html = await soraFetch(url);
         if (!html) return null;
 
-        // Hunt down embedded standard iframe player sources
+        // Extract raw iframe players
         const iframeRegex = /<iframe[^>]+src=["']([^"']+)["']/i;
         const match = html.match(iframeRegex);
         
@@ -109,19 +120,16 @@ async function extractStreamUrl(url) {
             return src;
         }
         
-        // Secondary fallback for raw media source allocations
         const scriptVideoRegex = /file\s*:\s*["'](http[s]?:\/\/[^"']+)["']/i;
         const fileMatch = html.match(scriptVideoRegex);
         return fileMatch ? fileMatch[1] : null;
 
     } catch (error) {
-        console.log('Stream fetch error:', error);
         return null;
     }
 }
 
 /** * Sora Environment Compatibility Layer
- * Intercepts network calls safely via Sora's underlying native platform hook
  */
 async function soraFetch(url, options = { headers: {}, method: 'GET', body: null }) {
     try {
@@ -131,7 +139,6 @@ async function soraFetch(url, options = { headers: {}, method: 'GET', body: null
             const res = await fetch(url, options);
             return await res.text();
         } catch(error) {
-            console.log('soraFetch native fallback error: ' + error.message);
             return null;
         }
     }
