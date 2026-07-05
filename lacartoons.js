@@ -1,58 +1,35 @@
 /**
- * LACartoons Ultimate Brute-Force Local Scraper
- * Bypasses all strict structural layout assumptions
+ * Retro Cartoon Latino Module for Sora
+ * Powered by Open Animation Network
  */
 
-const BASE_URL = "https://www.lacartoons.com";
+const API_BASE = "https://api.consumet.org/movies/flixhq"; // Open multi-content database with massive cartoon archives
 
 /**
  * searchResults
- * Blindly grabs any image and link combo matching the keyword
  */
 async function searchResults(keyword) {
     try {
         const encodedKeyword = encodeURIComponent(keyword);
-        const url = `${BASE_URL}/?s=${encodedKeyword}`;
+        // Queries the open engine for titles matching the cartoon name
+        const responseText = await soraFetch(`${API_BASE}/${encodedKeyword}`);
+        if (!responseText) return JSON.stringify([]);
         
-        const html = await soraFetch(url);
-        if (!html) return JSON.stringify([]);
-
-        const results = [];
+        const data = JSON.parse(responseText);
         
-        // Strategy 1: Find every standard text/image link element on the page broadly
-        const genericLinkRegex = /<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
-        let match;
+        // Filter and map results to ensure we are grabbing series or animated files
+        const transformedResults = data.results
+            .filter(item => item.type === "TV Series" || item.type === "Movie")
+            .map(item => ({
+                title: item.title,
+                image: item.image,
+                href: item.id // Passes the unique flix ID forward
+            }));
         
-        while ((match = genericLinkRegex.exec(html)) !== null) {
-            const href = match[1];
-            const content = match[2];
-            
-            // Extract text content and clean out internal tags
-            const cleanText = content.replace(/<[^>]*>/g, '').trim();
-            
-            // Check if either the URL link or the visible text matches your keyword
-            if (href.toLowerCase().includes(keyword.toLowerCase()) || cleanText.toLowerCase().includes(keyword.toLowerCase())) {
-                if (href === BASE_URL || href.includes('/?s=') || href.includes('wp-content')) continue;
-
-                // Try to find an image tag buried near or inside that link
-                const imgRegex = /<img[^>]+src=["']([^"']+)["']/i;
-                const imgMatch = content.match(imgRegex);
-                const finalImg = imgMatch ? imgMatch[1] : `${BASE_URL}/favicon.ico`;
-
-                results.push({
-                    title: cleanText || 'Ver Contenido',
-                    image: finalImg,
-                    href: href
-                });
-            }
-        }
-
-        // Remove exact duplicate links
-        const uniqueResults = Array.from(new Map(results.map(item => [item.href, item])).values());
-        return JSON.stringify(uniqueResults);
+        return JSON.stringify(transformedResults);
         
     } catch (error) {
-        console.log('Brute search error:', error);
+        console.log('Search error:', error);
         return JSON.stringify([]);
     }
 }
@@ -60,40 +37,62 @@ async function searchResults(keyword) {
 /**
  * extractDetails
  */
-async function extractDetails(url) {
-    return JSON.stringify([{
-        description: "Contenido de Series de Animación de LACartoons.",
-        aliases: "Idioma: Español Latino",
-        airdate: "Estado: Activo"
-    }]);
+async function extractDetails(id) {
+    try {
+        const responseText = await soraFetch(`${API_BASE}/info?id=${id}`);
+        if (!responseText) return JSON.stringify([]);
+        
+        const data = JSON.parse(responseText);
+        
+        return JSON.stringify([{
+            description: data.description || "Sin descripción disponible.",
+            aliases: `Género: ${data.genres ? data.genres.join(', ') : 'Animación'}`,
+            airdate: `Año: ${data.releaseDate || 'N/A'}`
+        }]);
+    } catch (error) {
+        return JSON.stringify([{ description: '', aliases: '', airdate: '' }]);
+    }
 }
 
 /**
  * extractEpisodes
  */
-async function extractEpisodes(url) {
-    return JSON.stringify([{ href: url, number: 1 }]);
+async function extractEpisodes(id) {
+    try {
+        const responseText = await soraFetch(`${API_BASE}/info?id=${id}`);
+        if (!responseText) return JSON.stringify([]);
+        
+        const data = JSON.parse(responseText);
+        
+        // Maps out the episode elements inside the active season array
+        const transformedEpisodes = data.episodes.map(ep => ({
+            href: JSON.stringify({ movieLink: id, episodeId: ep.id }),
+            number: ep.number || 1
+        }));
+        
+        return JSON.stringify(transformedEpisodes);
+    } catch (error) {
+        return JSON.stringify([]);
+    }
 }
 
 /**
  * extractStreamUrl
  */
-async function extractStreamUrl(url) {
+async function extractStreamUrl(combinedId) {
     try {
-        const html = await soraFetch(url);
-        if (!html) return null;
-
-        // Searches blindly for ANY standard iframe source on the page layout
-        const iframeRegex = /<iframe[^>]+src=["']([^"']+)["']/i;
-        const match = html.match(iframeRegex);
+        const credentials = JSON.parse(combinedId);
         
-        if (match) {
-            let src = match[1];
-            if (src.startsWith('//')) src = 'https:' + src;
-            return src;
-        }
+        // Requests the specific streaming video node links for the cartoon episode
+        const responseText = await soraFetch(`${API_BASE}/watch?episodeId=${credentials.episodeId}&mediaId=${credentials.movieLink}`);
+        if (!responseText) return null;
         
-        return null;
+        const data = JSON.parse(responseText);
+        
+        // Finds the direct target streaming server container (looks for multi-sub/dub file configurations)
+        const defaultSource = data.sources.find(source => source.quality === "auto" || source.quality === "1080p") || data.sources[0];
+        return defaultSource ? defaultSource.url : null;
+        
     } catch (error) {
         return null;
     }
