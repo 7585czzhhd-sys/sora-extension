@@ -1,22 +1,21 @@
+/** * LACartoons Sora Module
+ * Built using the Soru/Sora custom fetch runtime template
+ */
+
 const BASE_URL = "https://www.lacartoons.com";
 
-/**
- * Search content
- * @returns {Promise<string>} - JSON array string: [{title, image, href}, ...]
+/** searchResults
+ * Searches for cartoons based on a keyword using Sora's network wrapper.
  */
-export async function searchResults(keyword) {
+async function searchResults(keyword) {
     try {
-        // Enforce URL encoding for spaces and special characters in search terms
-        const searchUrl = `${BASE_URL}/?s=${encodeURIComponent(keyword)}`;
-        const response = await fetch(searchUrl, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
-        });
-
-        if (!response.ok) return JSON.stringify([]);
-        const html = await response.text();
+        const encodedKeyword = encodeURIComponent(keyword);
+        // soraFetch returns the raw HTML string directly
+        const html = await soraFetch(`${BASE_URL}/?s=${encodedKeyword}`);
+        if (!html) return JSON.stringify([]);
 
         const results = [];
-        // Matches typical cartoon entry structures on WordPress/Streaming sites
+        // WordPress / web-scraping regex to pull matching posts
         const articleRegex = /<article[^>]*>[\s\S]*?href=["']([^"']+)["'][^>]*title=["']([^"']+)["'][\s\S]*?src=["']([^"']+)["']/gi;
         
         let match;
@@ -30,48 +29,46 @@ export async function searchResults(keyword) {
 
         return JSON.stringify(results);
     } catch (error) {
-        console.error("[LACartoons] Search failed:", error);
+        console.log('Search error:', error);
         return JSON.stringify([]);
     }
 }
 
-/**
- * Extract item details
- * @returns {Promise<string>} - JSON string: {description, aliases, airdate}
+/** extractDetails
+ * Extracts details from the cartoon's main overview page.
  */
-export async function extractDetails(url) {
+async function extractDetails(url) {
     try {
-        const response = await fetch(url);
-        if (!response.ok) return JSON.stringify({});
-        const html = await response.text();
+        const html = await soraFetch(url);
+        if (!html) return JSON.stringify([]);
 
-        // Extract description from meta tags or post content
         const descMatch = html.match(/<meta name="description" content="([^"]+)"/i) || html.match(/<p>([\s\S]*?)<\/p>/i);
         const description = descMatch ? descMatch[1].replace(/<[^>]*>/g, '').trim() : "No description available.";
 
-        return JSON.stringify({
+        const transformedResults = [{
             description: description,
-            aliases: "",
-            airdate: ""
-        });
+            aliases: "Language: Spanish",
+            airdate: "Status: Available"
+        }];
+        
+        return JSON.stringify(transformedResults);
     } catch (error) {
-        return JSON.stringify({});
+        console.log('Details error:', error);
+        return JSON.stringify([{ description: 'Error loading details', aliases: '', airdate: '' }]);
     }
 }
 
-/**
- * Extract episodes
- * @returns {Promise<string>} - JSON array string: [{href, number}, ...]
+/** extractEpisodes
+ * Gathers the lists of individual stream links/episodes.
  */
-export async function extractEpisodes(url) {
+async function extractEpisodes(url) {
     try {
-        const response = await fetch(url);
-        if (!response.ok) return JSON.stringify([]);
-        const html = await response.text();
+        const html = await soraFetch(url);
+        if (!html) return JSON.stringify([]);
 
         const episodes = [];
-        // Regex looks for episode/video anchors linked inside the grid or list layouts
-        const epRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?Capitulo\s*\d+|[\s\S]*?Episode\s*\d+[^<]*)<\/a>/gi;
+        // Scrapes anchors targeting streaming lists or specific player endpoints
+        const epRegex = /<a[^+]+href=["']([^"']+)["'][^>]*>([\s\S]*?Capitulo\s*\d+|[\s\S]*?Episode\s*\d+[^<]*)<\/a>/gi;
 
         let match;
         let count = 1;
@@ -82,65 +79,60 @@ export async function extractEpisodes(url) {
             });
         }
 
-        // If no structured list matches, fallback to returning the main URL as episode 1
+        // Fallback: If no distinct grid links match, treat the source page as Episode 1
         if (episodes.length === 0) {
             episodes.push({ href: url, number: 1 });
         }
 
         return JSON.stringify(episodes);
     } catch (error) {
+        console.log('Episodes error:', error);
         return JSON.stringify([]);
     }
 }
 
-/**
- * Get stream URL
- * @returns {Promise<string|object>} - Multi-server streams object
+/** extractStreamUrl
+ * Grabs embed strings or direct media links.
  */
-export async function extractStreamUrl(url) {
+async function extractStreamUrl(url) {
     try {
-        const response = await fetch(url, {
-            headers: { 'Referer': BASE_URL }
-        });
-        if (!response.ok) return JSON.stringify({ streams: [] });
-        const html = await response.text();
+        const html = await soraFetch(url);
+        if (!html) return null;
 
-        const streams = [];
-
-        // 1. Gather iframe mirrors
-        const iframeRegex = /<iframe[^>]+src=["']([^"']+)["']/gi;
-        let match;
-        while ((match = iframeRegex.exec(html)) !== null) {
+        // Hunt down embedded standard iframe player sources
+        const iframeRegex = /<iframe[^>]+src=["']([^"']+)["']/i;
+        const match = html.match(iframeRegex);
+        
+        if (match) {
             let src = match[1];
             if (src.startsWith('//')) src = 'https:' + src;
-            if (src.startsWith('/')) src = BASE_URL + src;
-
-            let name = "External Mirror";
-            if (src.includes("vidhide")) name = "VidHide";
-            if (src.includes("streamtape")) name = "StreamTape";
-            if (src.includes("fembed")) name = "Fembed";
-
-            streams.push({
-                title: name,
-                streamUrl: src,
-                headers: { "Referer": BASE_URL }
-            });
+            return src;
         }
+        
+        // Secondary fallback for raw media source allocations
+        const scriptVideoRegex = /file\s*:\s*["'](http[s]?:\/\/[^"']+)["']/i;
+        const fileMatch = html.match(scriptVideoRegex);
+        return fileMatch ? fileMatch[1] : null;
 
-        // 2. Gather raw source direct streams if available
-        const scriptVideoRegex = /file\s*:\s*["'](http[s]?:\/\/[^"']+)["']/gi;
-        while ((match = scriptVideoRegex.exec(html)) !== null) {
-            streams.push({
-                title: "Direct Stream",
-                streamUrl: match[1],
-                headers: { "Referer": BASE_URL }
-            });
-        }
-
-        return {
-            streams: streams
-        };
     } catch (error) {
-        return { streams: [] };
+        console.log('Stream fetch error:', error);
+        return null;
+    }
+}
+
+/** * Sora Environment Compatibility Layer
+ * Intercepts network calls safely via Sora's underlying native platform hook
+ */
+async function soraFetch(url, options = { headers: {}, method: 'GET', body: null }) {
+    try {
+        return await fetchv2(url, options.headers ?? {}, options.method ?? 'GET', options.body ?? null);
+    } catch(e) {
+        try {
+            const res = await fetch(url, options);
+            return await res.text();
+        } catch(error) {
+            console.log('soraFetch native fallback error: ' + error.message);
+            return null;
+        }
     }
 }
