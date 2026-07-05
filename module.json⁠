@@ -1,15 +1,24 @@
 {
-  "id": "com.lacartoons.sora",
-  "name": "LACartoons",
+  "sourceName": "LACartoons",
+  "iconUrl": "https://www.lacartoons.com/favicon.ico",
+  "author": {
+    "name": "Sora Developer",
+    "icon": "https://files.catbox.moe/741wp7.png"
+  },
   "version": "1.0.0",
-  "description": "Scrapes and streams content from LACartoons.",
-  "icon": "https://www.lacartoons.com/favicon.ico",
-  "author": "Sora Developer",
-  "type": "video_extension",
-  "script": "https://raw.githubusercontent.com/7585czzhhd-sys/sora-extension/main/lacartoons.js",
-  "meta": {
-    "supported_urls": [
-      "https://*.lacartoons.com/*"
-    ]
-  }
+  "language": "Spanish",
+  "streamType": "MP4/Embed",
+  "quality": "Multi",
+  "baseUrl": "https://www.lacartoons.com/",
+  "searchBaseUrl": "https://www.lacartoons.com/",
+  "scriptUrl": "https://raw.githubusercontent.com/7585czzhhd-sys/sora-extension/main/lacartoons.js",
+  "type": "shows/movies/anime",
+  "asyncJS": true,
+  "softsub": true,
+  "downloadSupport": false,
+  "supportsSora": true,
+  "supportsLuna": true,
+  "supportsTsumi": true,
+  "supportsHiyoku": true,
+  "supportsEclipse": true
 }
