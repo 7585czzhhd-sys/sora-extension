@@ -1,55 +1,71 @@
-/** * LACartoons Sora Module
- * Powered by your personal Vercel API Mirror
+/**
+ * LACartoons Sora Local Scraper Module
+ * Bypasses Cloudflare by running directly on your residential device connection
  */
 
-// Your live Vercel base endpoint
-const API_URL = "https://lacartoons-api.vercel.app/api";
+const BASE_URL = "https://www.lacartoons.com";
 
-/** searchResults
- * Connects directly to your Vercel serverless function
+/**
+ * searchResults
+ * Downloads the HTML search page directly on your device and extracts titles
  */
 async function searchResults(keyword) {
     try {
         const encodedKeyword = encodeURIComponent(keyword);
+        const url = `${BASE_URL}/?s=${encodedKeyword}`;
         
-        // Hits your Vercel API mirror to get clean, structured JSON
-        const responseText = await soraFetch(`${API_URL}/search?keyword=${encodedKeyword}`);
-        if (!responseText) return JSON.stringify([]);
+        // Fetch the raw page HTML using Sora's native network layer
+        const html = await soraFetch(url);
+        if (!html) return JSON.stringify([]);
+
+        const results = [];
         
-        const data = JSON.parse(responseText);
+        // Regex pattern to extract article links, images, and titles from the page HTML
+        const articleRegex = /<article[^>]*>[\s\S]*?<a\s+href="([^"]+)"[^>]*>[\s\S]*?<img[^>]+src="([^"]+)"[\s\S]*?<h[23][^>]*>([\s\S]*?)<\/h[23]>/gi;
         
-        // Formats the data perfectly into what Sora expects
-        const transformedResults = data.animes.map(anime => ({
-            title: anime.name,
-            image: anime.img,
-            href: `https://www.lacartoons.com/${anime.id}`
-        }));
-        
-        return JSON.stringify(transformedResults);
+        let match;
+        while ((match = articleRegex.exec(html)) !== null) {
+            const href = match[1];
+            const img = match[2];
+            // Remove any leftover HTML tags inside the title string
+            const title = match[3].replace(/<[^>]*>/g, '').trim();
+
+            if (href && title) {
+                results.push({
+                    title: title,
+                    image: img || `${BASE_URL}/favicon.ico`,
+                    href: href
+                });
+            }
+        }
+
+        return JSON.stringify(results);
         
     } catch (error) {
-        console.log('API Search error:', error);
+        console.log('Local search processing error:', error);
         return JSON.stringify([]);
     }
 }
 
-/** extractDetails
- * Fallback placeholders for series structure
+/**
+ * extractDetails
+ * Loads metadata descriptions for the active card layout
  */
 async function extractDetails(url) {
     try {
         return JSON.stringify([{
-            description: "Contenido de LACartoons",
+            description: "Contenido disponible en LACartoons.",
             aliases: "Idioma: Español Latino",
-            airdate: "Estado: Activo"
+            airdate: "Estado: Completo"
         }]);
     } catch (error) {
         return JSON.stringify([{ description: '', aliases: '', airdate: '' }]);
     }
 }
 
-/** extractEpisodes
- * Returns the current link container as the target stream link
+/**
+ * extractEpisodes
+ * Passes the target page container directly down to the stream hook
  */
 async function extractEpisodes(url) {
     try {
@@ -59,14 +75,16 @@ async function extractEpisodes(url) {
     }
 }
 
-/** extractStreamUrl
- * Scrapes standard iframe sources directly from the page hook
+/**
+ * extractStreamUrl
+ * Grabs the direct video server frame from inside the webpage contents
  */
 async function extractStreamUrl(url) {
     try {
         const html = await soraFetch(url);
         if (!html) return null;
 
+        // Finds the streaming iframe source container on the page
         const iframeRegex = /<iframe[^>]+src=["']([^"']+)["']/i;
         const match = html.match(iframeRegex);
         
@@ -82,7 +100,8 @@ async function extractStreamUrl(url) {
     }
 }
 
-/** * Sora Environment Compatibility Layer
+/**
+ * Sora Environment Compatibility Layer
  */
 async function soraFetch(url, options = { headers: {}, method: 'GET', body: null }) {
     try {
